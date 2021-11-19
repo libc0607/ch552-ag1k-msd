@@ -67,3 +67,11 @@ AG1K 没有内置存储器，但是可以通过 SPI 往内置 SRAM 写比特流�
   
 # 协议 
 GNU Lesser General Public License v2.1  （和 [DeqingSun/ch55xduino](https://github.com/DeqingSun/ch55xduino) 相同）
+
+# 免责声明 Disclaimer  
+我 菜得一批  
+I very vegetable  
+照着例程写的这破玩意儿 偶尔能用 偶尔不能  
+ctrl+c ed from github, sometimes working sometimes boom  
+这个就做着玩玩 请不要在严肃的场景下使用 造成什么后果和我无关 谢谢茄子  
+booooom demo kankei nai desu arigatonasu  
