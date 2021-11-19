@@ -1,3 +1,9 @@
+// From the MSD example in https://github.com/DeqingSun/ch55xduino
+// Modified by @libc0607
+// 
+// The AG1K bitstream is around ~48kbytes and the MSD example has 32kbytes file size limit
+// so I increased the "max clusters per file" a little bit (actully, one bit).
+
 #include "USBMassStorage.h"
 #include "USBMediumAccess.h"
 
@@ -40,10 +46,10 @@ __code const uint8_t emuDisk_Inquiry_Data[] =
     0x00,
     0x00,
     /* Vendor Identification */
-    'D', 'e', 'q', 'i', 'n', 'g', ' ', ' ',				/* Manufacturer: 8 bytes */
+    'S', 'p', 'y', 'C', 'h', 'i', 'c', 'k',				/* Manufacturer: 8 bytes */
     /* Product Identification */
-    'C', 'H', '5', '5', 'x', 'd', 'u', 'i',				/* Product : 16 Bytes */
-		'n', 'o', ' ', 'M', 'S', 'D', ' ', ' ',
+    'A', 'G', '1', 'K', ' ', 'M', 'S', 'D',				/* Product : 16 Bytes */
+	' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ',
     /* Product Revision Level */
     '1', '.', '0', ' '														/* Version : 4 Bytes */
   };
@@ -55,7 +61,7 @@ __code const uint8_t DBR_data[62]={
     0x01,                      //Sectors/cluster (1)
     0x01, 0x00,                //Size of reserved area (1 sector)
     0x02,                      //Number of FATs (2)
-    0x00, 0x02,                //Max. number of root directory entries (0x0200 = 512)
+    0x00, 0x01,                //Max. number of root directory entries (0x0100 = 256)
     0x00, 0x00,                //Total number of sectors (0, not used)
     0xF8,                      //Media type (hard disk)
     0x40, 0x00,                //FAT size (0x0040 = 64 sectors)
@@ -69,7 +75,7 @@ __code const uint8_t DBR_data[62]={
     0x00, 0x00, 0x00, 0x00,    //Volume serial number
     
     //Volume label
-    'C', 'H', '5', '5', 'X', ' ', 'M', 'S', 'D', ' ', ' ',
+    'A', 'G', '1', 'K', ' ', 'M', 'S', 'D', ' ', ' ', ' ',
     
     //File system type label
     'F', 'A', 'T', '1', '6', 0x20,0x20, 0x20,
@@ -83,7 +89,7 @@ extern __code uint8_t filesOnDriveCount;    //refer to main file
 //Root directory
 __code const uint8_t RootDir[32]={
     //label, match DBR
-    'C', 'H', '5', '5', 'X', ' ', 'M', 'S', 'D', ' ', ' ',
+    'A', 'G', '1', 'K', ' ', 'M', 'S', 'D', ' ', ' ', ' ',
     0x08,                  //File Attributes, Volume Label (0x08).
     0x00,                  //Reserved
     0x00,                  //Create time, fine resolution: 10 ms units, Byte 13
@@ -132,11 +138,12 @@ void LUN_Read_func_DBR(uint16_t DBR_data_index){    //separate funcs relieve the
 //emulated file allocation table
 //little-endian
 //Unused (0x0000) Cluster in use by a file(Next cluster) Bad cluster (0xFFF7) Last cluster in a file (0xFFF8-0xFFFF).
+//FAT_data_index:0x0~0x3fff
 void LUN_Read_func_FAT(uint16_t FAT_data_index){    //separate funcs relieve the register usage
     for (uint8_t i=0;i<BULK_MAX_PACKET_SIZE;i++){
         uint8_t sendVal=0;
-        //uint16_t fatEntry = 0x0000; //Free
-        uint16_t fatEntry = 0xFFF7; //Bad cluster
+        uint16_t fatEntry = 0x0000; //Free
+        //uint16_t fatEntry = 0xFFF7; //Bad cluster
         if (FAT_data_index<4){  //FAT16: FAT[0] = 0xFF??; FAT[1] = 0xFFFF; ?? in the value of FAT[0] is the same value of BPB_Media
             if (FAT_data_index<2){
                 fatEntry = 0xFF00|DBR_data[21];
@@ -144,14 +151,14 @@ void LUN_Read_func_FAT(uint16_t FAT_data_index){    //separate funcs relieve the
                 fatEntry = 0xFFFF;
             }
         }else{
-            uint8_t fileIndex = ((FAT_data_index-4)/2)/64;  //64 sector reserved per file
-            uint8_t fileOffset = ((FAT_data_index-4)/2)%64;
+            uint8_t fileIndex = ((FAT_data_index-4)/2)/128;  //128 sector reserved per file
+            uint8_t fileOffset = ((FAT_data_index-4)/2)%128;
             uint8_t clusterUsage = (filesOnDrive[fileIndex].filesize+511)/512;
             if (fileIndex<filesOnDriveCount){
                 if (fileOffset<clusterUsage){
                     fatEntry = 0xFFF8; //end of file
                     if ((fileOffset+1)<clusterUsage){
-                        fatEntry = 64*fileIndex + fileOffset + 3;   //make FAT link to next cluster.
+                        fatEntry = 128*fileIndex + fileOffset + 3;   //make FAT link to next cluster.
                     }
                 }
             }
@@ -199,7 +206,8 @@ void LUN_Read_func_Root_DIR(uint16_t rootAddrIndex){    //separate funcs relieve
             }else if (offsetIndex<26){ //Last modified date
                 sendVal = filesOnDrive[fileIndex].filedate[offsetIndex-24];
             }else if (offsetIndex<28){ //Start of file in clusters in FAT12 and FAT16.
-                uint16_t startClusters = 2 + fileIndex*64;  //make file 64 clusters, 32K apart. Should be enough?
+                //uint16_t startClusters = 2 + fileIndex*64;  //make file 64  clusters, 32K apart. Should be enough? no.
+                uint16_t startClusters = 2 + fileIndex*128;   //make file 128 clusters, 64K apart. Should be enough.
                 if (offsetIndex == 26){
                     sendVal = startClusters & 0xFF;
                 }else{
@@ -222,8 +230,8 @@ void LUN_Read_func_Root_DIR(uint16_t rootAddrIndex){    //separate funcs relieve
 }
 
 void LUN_Read_func_Files(uint32_t file_data_index){    //separate funcs relieve the register usage
-    uint8_t fileIndex = file_data_index/32768;
-    uint16_t fileOffset = file_data_index%32768;
+    uint8_t fileIndex = file_data_index/65536;		// mod: 64kb files
+    uint16_t fileOffset = file_data_index%65536;
     uint16_t fileSize = filesOnDrive[fileIndex].filesize;
     if (fileIndex<filesOnDriveCount && fileOffset<fileSize){
         //check file response type
@@ -251,20 +259,21 @@ void LUN_Read (uint32_t curAddr) {
         LUN_Read_func_DBR(curAddr);
     }else if ( curAddr<(512+512*128L) ){  //0x200 0x8200, Each FAT is 32 sectors
         if (curAddr>=512*65L){  //FAT2
-            LUN_Read_func_FAT(curAddr-512*65L);			// todo?
+            LUN_Read_func_FAT(curAddr-512*65L);			// redirect to fat1
         }else{                  //FAT1
             LUN_Read_func_FAT(curAddr-512);
         }
-    }else if ( (curAddr<512*161L) ){ //0x10200    Root directory, 512 items, 32 bytes each
+	// mod: 64kbytes per file, 0x10200~0x12200 Root directory, 256 items, 32 bytes each
+    }else if ( (curAddr<512*145L) ){ 
         LUN_Read_func_Root_DIR(curAddr - 512*129L);
-    }else {  //0x14200 1st usable cluster, with index 2.
-        LUN_Read_func_Files(curAddr - 512*161L);
+    }else {  //0x12200 1st usable cluster, with index 2.
+        LUN_Read_func_Files(curAddr - 512*145L); 
     }
 }
 
 void LUN_Write_func_Files(uint32_t file_data_index){    //separate funcs relieve the register usage
-    uint8_t fileIndex = file_data_index/32768;
-    uint16_t fileOffset = file_data_index%32768;
+    uint8_t fileIndex = file_data_index/65536; 	// mod: 64kb files
+    uint16_t fileOffset = file_data_index%65536;
     uint16_t fileSize = filesOnDrive[fileIndex].filesize;
 
     if (fileIndex<filesOnDriveCount && fileOffset<fileSize){
@@ -277,10 +286,10 @@ void LUN_Write_func_Files(uint32_t file_data_index){    //separate funcs relieve
 
 // Write BULK_MAX_PACKET_SIZE bytes of data from BOT_Rx_Buf to device
 void LUN_Write (uint32_t curAddr) {
-    if ( (curAddr<512*161L) ){ //0x10200    Root directory, 512 items, 32 bytes each
+    if ( (curAddr<512*145L) ){ //0x10200    Root directory, 256 items, 32 bytes each
         //don't care Root directory write, FAT write or Boot Sector write
-    }else {  //0x14200 1st usable cluster, with index 2.
-        LUN_Write_func_Files(curAddr - 512*161L);
+    }else {  
+        LUN_Write_func_Files(curAddr - 512*145L); // mod: 0x12200 1st usable cluster, with index 2.
     }
 }
 
